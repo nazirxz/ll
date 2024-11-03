@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Well Data Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <style>
+        .fleet-section {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+        }
+        .fleet-header {
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            background-color: #f8f9fa;
+            border-radius: 0.25rem;
+        }
+        .table-container { 
+            overflow-x: auto;
+        }
+        .draggable-row { 
+            cursor: move; 
+        }
+        .draggable-row:hover { 
+            background-color: #f8f9fa; 
+        }
+        .dragging { 
+            background-color: #e9ecef; 
+            opacity: 0.8; 
+        }
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 4px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            background-color: #f8f9fa;
+            transition: background-color 0.3s;
+        }
+        .drop-zone.dragover {
+            background-color: #e2e6ea;
+            border-color: #0d6efd;
+        }
+        .sortable-ghost {
+            opacity: 0.4;
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <h2>Well Data Management</h2>
+
+        <!-- Loading overlay -->
+        <div id="loadingOverlay" class="loading d-none">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+
+        <!-- File Drop Zone -->
+        <div class="drop-zone" id="dropZone">
+            <p>Drag & Drop CSV file here</p>
+            <p>or</p>
+            <input type="file" id="fileInput" accept=".csv" class="d-none">
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                Choose File
+            </button>
+        </div>
+
+        <!-- Sample Data Button -->
+        <div class="mb-3">
+            <button class="btn btn-secondary" onclick="loadSampleData()">Load Sample Data</button>
+        </div>
+
+        <!-- Fleet Container -->
+        <div id="fleetContainer"></div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentData = [];
+        let sortableGroups = [];
+
+        // Sample data
+        const sampleData = [
+            {
+                "WELL_NAME": "WELL1",
+                "DURATION": 71,
+                "START_EW": "14-Jul-2024",
+                "FINISH_DATE": "23-Sep-2024",
+                "FLEET": "RDP #1",
+                "NO_FLEET": 1.0,
+                "STATUS": "Soil Filling 71% - 99%",
+                "PLOT": "1Plot",
+                "ERROR_CHECKING": 0,
+                "PERSEN_RL": 0.95,
+                "DELTA": -27.0,
+                "FIELD": "Minas",
+                "RIG_HP": 550,
+                "MK": "RDP",
+                "DT": 24.0,
+                "RFC_MAX_REQUIRED": "23-Jul-2024",
+                "RFD": "03-Oct-2024",
+                "EST_SOIL_FILLING": 25382,
+                "LOKASI_BORROW_PIT": "BP 7E-39/7E-58",
+                "EST_JARAK_HAULING": 8,
+                "TRIP_DAY": 8,
+                "EST_FLEET": 2,
+                "EST_DUR_SOIL_COMPLETION": 17,
+                "CT_HAULING_TRIP": 56,
+                "EST_COMPLETION_EARTHWORK": "23-Sep-2024",
+                "EST_COMPLETION_PARTIAL_RFD": "03-Oct-2024",
+                "DRMI": "06-Sep-2024",
+                "DESCRIPTION": "NONE"
+            },
+            {
+                "WELL_NAME": "WELL2",
+                "DURATION": 7,
+                "START_EW": "23-Sep-2024",
+                "FINISH_DATE": "30-Sep-2024",
+                "FLEET": "RDP #2",
+                "NO_FLEET": 1.0,
+                "STATUS": "RFC (RL not Started)",
+                "PLOT": "1Plot",
+                "ERROR_CHECKING": 0,
+                "PERSEN_RL": 0,
+                "DELTA": 70.0,
+                "FIELD": "Minas",
+                "RIG_HP": 550,
+                "MK": "RDP",
+                "DT": 24.0,
+                "RFC_MAX_REQUIRED": "04-Nov-2024",
+                "RFD": "10-Oct-2024",
+                "EST_SOIL_FILLING": 15264,
+                "LOKASI_BORROW_PIT": "BP 7E-39/7E-58",
+                "EST_JARAK_HAULING": 3,
+                "TRIP_DAY": 12,
+                "EST_FLEET": 2,
+                "EST_DUR_SOIL_COMPLETION": 7,
+                "CT_HAULING_TRIP": 37,
+                "EST_COMPLETION_EARTHWORK": "30-Sep-2024",
+                "EST_COMPLETION_PARTIAL_RFD": "10-Oct-2024",
+                "DRMI": "19-Dec-2024",
+                "DESCRIPTION": "NONE"
+            }
+        ];
+
+        function createFleetSection(fleet, data) {
+            const section = document.createElement('div');
+            section.className = 'fleet-section';
+            
+            const header = document.createElement('div');
+            header.className = 'fleet-header';
+            header.innerHTML = `<h4>${fleet}</h4>`;
+            
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'table-container';
+            
+            const table = document.createElement('table');
+            table.className = 'table table-bordered table-striped';
+            
+            const thead = document.createElement('thead');
+            thead.className = 'table-light';
+            thead.innerHTML = `
+                <tr>
+                    <th>WELL_NAME</th>
+                    <th>DURATION</th>
+                    <th>START_EW</th>
+                    <th>FINISH_DATE</th>
+                    <th>FLEET</th>
+                    <th>NO_FLEET</th>
+                    <th>STATUS</th>
+                    <th>PLOT</th>
+                    <th>ERROR_CHECKING</th>
+                    <th>PERSEN_RL</th>
+                    <th>DELTA</th>
+                    <th>FIELD</th>
+                    <th>RIG_HP</th>
+                    <th>MK</th>
+                    <th>DT</th>
+                    <th>RFC_MAX_REQUIRED</th>
+                    <th>RFD</th>
+                    <th>EST_SOIL_FILLING</th>
+                    <th>LOKASI_BORROW_PIT</th>
+                    <th>EST_JARAK_HAULING</th>
+                    <th>TRIP_DAY</th>
+                    <th>EST_FLEET</th>
+                    <th>EST_DUR_SOIL_COMPLETION</th>
+                    <th>CT_HAULING_TRIP</th>
+                    <th>EST_COMPLETION_EARTHWORK</th>
+                    <th>EST_COMPLETION_PARTIAL_RFD</th>
+                    <th>DRMI</th>
+                    <th>DESCRIPTION</th>
+                </tr>
+            `;
+            
+            const tbody = document.createElement('tbody');
+            tbody.id = `fleet-${fleet.replace(/[^a-zA-Z0-9]/g, '-')}`;
+            tbody.className = 'sortable-fleet';
+            tbody.setAttribute('data-fleet', fleet);
+            
+            const fleetData = data.filter(row => row.FLEET === fleet);
+            fleetData.forEach(row => {
+                tbody.appendChild(createTableRow(row));
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            section.appendChild(header);
+            section.appendChild(tableContainer);
+            
+            return section;
+        }
+
+        function createTableRow(data) {
+            const tr = document.createElement('tr');
+            tr.className = 'draggable-row';
+            tr.innerHTML = `
+                <td>${data.WELL_NAME || ''}</td>
+                <td>${data.DURATION || 0}</td>
+                <td>${data.START_EW || ''}</td>
+                <td>${data.FINISH_DATE || ''}</td>
+                <td>${data.FLEET || ''}</td>
+                <td>${data.NO_FLEET || 0}</td>
+                <td>${data.STATUS || ''}</td>
+                <td>${data.PLOT || ''}</td>
+                <td>${data.ERROR_CHECKING || 0}</td>
+                <td>${data.PERSEN_RL}</td>
+                <td>${data.DELTA || 0}</td>
+                <td>${data.FIELD || ''}</td>
+                <td>${data.RIG_HP || 0}</td>
+                <td>${data.MK || ''}</td>
+                <td>${data.DT || 0}</td>
+                <td>${data.RFC_MAX_REQUIRED || ''}</td>
+                <td>${data.RFD || ''}</td>
+                <td>${data.EST_SOIL_FILLING || 0}</td>
+                <td>${data.LOKASI_BORROW_PIT || ''}</td>
+                <td>${data.EST_JARAK_HAULING || 0}</td>
+                <td>${data.TRIP_DAY || 0}</td>
+                <td>${data.EST_FLEET || 0}</td>
+                <td>${data.EST_DUR_SOIL_COMPLETION || 0}</td>
+                <td>${data.CT_HAULING_TRIP || 0}</td>
+                <td>${data.EST_COMPLETION_EARTHWORK || ''}</td>
+                <td>${data.EST_COMPLETION_PARTIAL_RFD || ''}</td>
+                <td>${data.DRMI || ''}</td>
+                <td>${data.DESCRIPTION || ''}</td>
+            `;
+            return tr;
+        }
+
+        async function handleDragEnd(evt) {
+            const fromFleetElement = evt.from;
+            const toFleetElement = evt.to;
+            const oldIndex = evt.oldIndex;
+            const newIndex = evt.newIndex;
+            
+            const sourceFleet = fromFleetElement.getAttribute('data-fleet');
+            const targetFleet = toFleetElement.getAttribute('data-fleet');
+            
+            toggleLoading(true);
+            
+            try {
+                if (sourceFleet !== targetFleet) {
+                    // Cross-fleet movement
+                    const sourceFleetData = currentData.filter(item => item.FLEET === sourceFleet);
+                    const draggedWell = sourceFleetData[oldIndex];
+                    
+                    if (draggedWell) {
+                        const response = await fetch('http://localhost:8001/adjust-data', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                data: currentData,
+                                moved_well: draggedWell,
+                                source_fleet: sourceFleet,
+                                target_fleet: targetFleet,
+                                new_index: newIndex
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || 'Failed to update data');
+                        }
+
+                        const result = await response.json();
+                        if (result.success) {
+                            currentData = result.data;
+                        } else {
+                            throw new Error(result.message);
+                        }
+                    }
+                } else {
+                    // Same fleet - update the data array and recalculate
+                    const movedItem = currentData.find((item, index) => 
+                        item.FLEET === sourceFleet && 
+                        currentData.filter(d => d.FLEET === sourceFleet).indexOf(item) === oldIndex
+                    );
+                    
+                    if (movedItem) {
+                        currentData = currentData.filter(item => item !== movedItem);
+                        const fleetItems = currentData.filter(item => item.FLEET === targetFleet);
+                        const insertIndex = fleetItems.length === 0 ? 
+                            currentData.length : 
+                            currentData.indexOf(fleetItems[0]) + newIndex;
+                        
+                        currentData.splice(insertIndex, 0, movedItem);
+                        await adjustData();
+                    }
+                }
+            } catch (error) {
+                console.error('Error during drag and drop:', error);
+                alert('Error updating data: ' + error.message);
+            } finally {
+                toggleLoading(false);
+                updateFleetSections();
+            }
+        }
+
+        function updateFleetSections() {
+            const fleetContainer = document.getElementById('fleetContainer');
+            fleetContainer.innerHTML = '';
+            
+            const fleets = [...new Set(currentData.map(row => row.FLEET))];
+            
+            sortableGroups.forEach(sortable => sortable.destroy());
+            sortableGroups = [];
+            
+            fleets.forEach(fleet => {
+                const section = createFleetSection(fleet, currentData);
+                fleetContainer.appendChild(section);
+                
+                const sortable = new Sortable(document.getElementById(`fleet-${fleet.replace(/[^a-zA-Z0-9]/g, '-')}`), {
+                    group: 'shared',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    dragClass: 'dragging',
+                    onEnd: handleDragEnd
+                });
+                sortableGroups.push(sortable);
+            });
+        }
+
+        async function adjustData() {
+            toggleLoading(true);
+            try {
+                const response = await fetch('http://localhost:8001/adjust-data', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ data: currentData })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Error adjusting data');
+                }
+
+                const result = await response.json();
+                if (result.success) {
+                    currentData = result.data;
+                    updateFleetSections();
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error: ' + error.message);
+            } finally {
+                toggleLoading(false);
+            }
+        }
+
+        function toggleLoading(show) {
+            document.getElementById('loadingOverlay').classList.toggle('d-none', !show);
+        }
+
+        function parseCSV(file) {
+            toggleLoading(true);
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: async function(results) {
+                    try {
+                        const parsedData = results.data.filter(row => 
+                            row.WELL_NAME && 
+                            row.FLEET
+                        );
+                        
+                        if (parsedData.length === 0) {
+                            throw new Error('No valid data found in CSV');
+                        }
+
+                        // Convert PERSEN_RL to decimal if it's in percentage format
+                        parsedData.forEach(row => {
+                            if (typeof row.PERSEN_RL === 'string' && row.PERSEN_RL.includes('%')) {
+                                row.PERSEN_RL = parseFloat(row.PERSEN_RL.replace('%', '')) / 100;
+                            }
+                        });
+
+                        currentData = parsedData;
+                        await adjustData();
+                    } catch (error) {
+                        console.error('Error processing CSV:', error);
+                        alert('Error processing CSV file: ' + error.message);
+                    } finally {
+                        toggleLoading(false);
+                    }
+                },
+                error: function(error) {
+                    console.error('Error parsing CSV:', error);
+                    alert('Error parsing CSV file');
+                    toggleLoading(false);
+                }
+            });
+        }
+
+        // File Drop Zone Event Handlers
+        function initializeFileDropZone() {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+
+            dropZone.addEventListener('drop', handleDrop, false);
+            fileInput.addEventListener('change', handleFiles, false);
+        }
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlight(e) {
+            document.getElementById('dropZone').classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            document.getElementById('dropZone').classList.remove('dragover');
+        }
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles({ target: { files: files } });
+        }
+
+        function handleFiles(e) {
+            const file = e.target.files[0];
+            if (file && file.type === 'text/csv') {
+                parseCSV(file);
+            } else {
+                alert('Please upload a CSV file');
+            }
+        }
+
+        function loadSampleData() {
+            currentData = [...sampleData];
+            updateFleetSections();
+        }
+
+        // Error handling helper
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            console.error('Error: ', msg, '\nURL: ', url, '\nLine: ', lineNo, '\nColumn: ', columnNo, '\nError object: ', error);
+            return false;
+        };
+
+        // Initialize everything when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            try {
+                initializeFileDropZone();
+                loadSampleData();
+            } catch (error) {
+                console.error('Error during initialization:', error);
+                alert('Error initializing application: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
